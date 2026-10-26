@@ -1,0 +1,22 @@
+﻿# Secrets and environment variables
+.env
+.env.*
+!.env.example
+
+# Logs and local data
+*.log
+logs/
+data/
+instances/
+
+# Backups
+*.bak
+*.backup
+*.tar
+*.tar.gz
+*.zip
+
+# Operating system and editor files
+.DS_Store
+Thumbs.db
+.vscode/
