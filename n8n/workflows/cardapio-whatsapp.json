@@ -1,85 +1,263 @@
 {
-  "name": "My workflow",
+  "name": "Cardápio WhatsApp",
   "nodes": [
     {
       "parameters": {
         "httpMethod": "POST",
         "path": "cardapio-whatsapp",
+        "responseMode": "onReceived",
         "options": {}
       },
       "type": "n8n-nodes-base.webhook",
       "typeVersion": 2.1,
       "position": [
-        -256,
-        -64
+        -680,
+        0
       ],
-      "id": "1b4ecf5e-5f9f-4b12-bdda-862c6c3dc6aa",
+      "id": "d7649df4-a7f9-4942-b545-a343a067c623",
       "name": "Recebe mensagem",
-      "webhookId": "1d7494df-a3d8-48f2-9c80-6a6e48bbfa6e"
+      "webhookId": "27a781d4-3c8e-4a5f-81a5-a116aa4aa691"
     },
     {
       "parameters": {
-        "conditions": {
-          "options": {
-            "caseSensitive": true,
-            "leftValue": "",
-            "typeValidation": "strict",
-            "version": 3
-          },
-          "conditions": [
-            {
-              "id": "4aa60c38-8818-4182-af96-39874dcb60ac",
-              "leftValue": "={{$json.body.event}}",
-              "rightValue": "messages.upsert",
-              "operator": {
-                "type": "string",
-                "operation": "equals",
-                "name": "filter.operator.equals"
-              }
-            },
-            {
-              "id": "a785b89f-bb2d-44d9-862c-97bc28945f64",
-              "leftValue": "={{ $json.body.data.key.remoteJid }}",
-              "rightValue": "5585986242299@s.whatsapp.net",
-              "operator": {
-                "type": "string",
-                "operation": "equals",
-                "name": "filter.operator.equals"
-              }
-            }
-          ],
-          "combinator": "and"
-        },
-        "options": {}
+        "mode": "runOnceForAllItems",
+        "jsCode": "const item = $input.first().json;\nconst body = item.body ?? item;\nconst data = body.data ?? {};\nconst key = data.key ?? {};\nconst remoteJid = String(key.remoteJid ?? '').replace(/:\\d+@/, '@');\nconst event = String(body.event ?? '').toLowerCase();\nconst fromMe = key.fromMe === true;\nconst isGroup = remoteJid.endsWith('@g.us') || remoteJid.endsWith('@broadcast');\nconst owner = String($env.OWNER_NUMBER ?? '').replace(/\\D/g, '');\nconst sender = String(remoteJid).split('@')[0].replace(/\\D/g, '');\nconst message = data.message ?? {};\nconst text = message.conversation\n  ?? message.extendedTextMessage?.text\n  ?? message.imageMessage?.caption\n  ?? message.videoMessage?.caption\n  ?? '';\n\nif (event !== 'messages.upsert') return [];\nif (!remoteJid) return [];\nif (fromMe || isGroup) return [];\nif (!text.trim()) return [];\nif (owner && sender !== owner) return [];\n\nreturn [{\n  json: {\n    chatId: remoteJid,\n    instance: body.instance ?? 'cardapio',\n    text: text.trim(),\n    pushName: data.pushName ?? ''\n  }\n}];"
       },
-      "type": "n8n-nodes-base.if",
-      "typeVersion": 2.3,
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
       "position": [
-        -64,
-        -64
+        -460,
+        0
       ],
-      "id": "c975800c-11a5-4b4d-8660-42c944f8940f",
-      "name": "verifica o número da mensagem"
+      "id": "dc803053-39cf-4aa4-bacc-73b2bdb2092e",
+      "name": "Filtrar mensagem"
     },
     {
       "parameters": {
-        "resource": "image",
-        "modelId": {
-          "__rl": true,
-          "mode": "list",
-          "value": ""
+        "method": "POST",
+        "url": "=http://api:8080/message/sendText/{{ $json.instance }}",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "apikey",
+              "value": "={{ $env.AUTHENTICATION_API_KEY }}"
+            }
+          ]
         },
-        "prompt": "={{ $('Recebe mensagem').item.json.body.data.message.conversation }}",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({ number: $json.chatId, text: 'Recebi! Estou montando o cardápio...' }) }}",
+        "options": {
+          "timeout": 15000
+        }
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        -220,
+        -180
+      ],
+      "id": "36b3be6a-e604-4878-91e6-ab1d557dcdba",
+      "name": "Avisa que está gerando",
+      "onError": "continueRegularOutput"
+    },
+    {
+      "parameters": {
+        "text": "={{ $json.text }}",
+        "schemaType": "manual",
+        "inputSchema": "{\n  \"type\": \"object\",\n  \"properties\": {\n    \"estabelecimento\": {\n      \"type\": \"string\",\n      \"description\": \"Nome do restaurante, se mencionado na mensagem.\"\n    },\n    \"titulo\": {\n      \"type\": \"string\",\n      \"description\": \"Título curto do cardápio, por exemplo \\\"Almoço de hoje\\\".\"\n    },\n    \"data\": {\n      \"type\": \"string\",\n      \"description\": \"Data do cardápio, se mencionada. Caso contrário, string vazia.\"\n    },\n    \"categorias\": {\n      \"type\": \"array\",\n      \"description\": \"Categorias do cardápio na ordem em que aparecem.\",\n      \"items\": {\n        \"type\": \"object\",\n        \"properties\": {\n          \"nome\": {\n            \"type\": \"string\",\n            \"description\": \"Nome da categoria, por exemplo \\\"Pratos\\\", \\\"Bebidas\\\" ou \\\"Sobremesas\\\".\"\n          },\n          \"itens\": {\n            \"type\": \"array\",\n            \"items\": {\n              \"type\": \"object\",\n              \"properties\": {\n                \"nome\": {\n                  \"type\": \"string\",\n                  \"description\": \"Nome do prato ou produto.\"\n                },\n                \"descricao\": {\n                  \"type\": \"string\",\n                  \"description\": \"Descrição ou acompanhamentos. Deixe vazio se não houver.\"\n                },\n                \"preco\": {\n                  \"type\": \"string\",\n                  \"description\": \"Preço formatado, por exemplo \\\"R$ 18,00\\\". Se não houver, use \\\"—\\\".\"\n                }\n              },\n              \"required\": [\n                \"nome\",\n                \"preco\"\n              ]\n            }\n          }\n        },\n        \"required\": [\n          \"nome\",\n          \"itens\"\n        ]\n      }\n    },\n    \"observacoes\": {\n      \"type\": \"string\",\n      \"description\": \"Observações gerais, se houver. Caso contrário, string vazia.\"\n    }\n  },\n  \"required\": [\n    \"categorias\"\n  ]\n}",
+        "options": {
+          "systemPromptTemplate": "Você é um assistente especializado em extrair cardápios de restaurantes.\nExtraia somente as informações presentes na mensagem. Não invente pratos, preços, descrições ou categorias.\nSe o cliente não separar por categorias, agrupe os itens em \"Pratos\".\nSe um preço não for informado, use \"—\".\nMantenha os nomes e as descrições como o cliente escreveu.\nSe houver bebidas, sobremesas ou acompanhamentos, crie categorias separadas."
+        }
+      },
+      "type": "@n8n/n8n-nodes-langchain.informationExtractor",
+      "typeVersion": 1.2,
+      "position": [
+        -220,
+        0
+      ],
+      "id": "9a171dc1-8200-4bba-8ec2-4b5a71e87d63",
+      "name": "Extrai cardápio"
+    },
+    {
+      "parameters": {
+        "modelName": "models/gemini-2.5-flash",
+        "options": {
+          "temperature": 0.1
+        }
+      },
+      "type": "@n8n/n8n-nodes-langchain.lmChatGoogleGemini",
+      "typeVersion": 1.2,
+      "position": [
+        -220,
+        220
+      ],
+      "id": "21915969-ab0e-4816-ab86-c0c744d1e041",
+      "name": "Google Gemini Chat Model"
+    },
+    {
+      "parameters": {
+        "operation": "read",
+        "fileSelector": "/templates/cardapio.html",
         "options": {}
       },
-      "type": "@n8n/n8n-nodes-langchain.googleGemini",
+      "type": "n8n-nodes-base.readWriteFile",
       "typeVersion": 1.1,
       "position": [
-        128,
-        -176
+        20,
+        0
       ],
-      "id": "17acad15-2510-46a4-ab19-96f1489bd110",
-      "name": "Generate an image"
+      "id": "9ac56f1c-96dd-45eb-9954-4b3962331fc9",
+      "name": "Lê template"
+    },
+    {
+      "parameters": {
+        "operation": "text",
+        "binaryPropertyName": "data",
+        "destinationKey": "template",
+        "options": {
+          "keepSource": "json"
+        }
+      },
+      "type": "n8n-nodes-base.extractFromFile",
+      "typeVersion": 1.2,
+      "position": [
+        240,
+        0
+      ],
+      "id": "4e6e72e1-4479-47d8-a8ec-b947a270bcaa",
+      "name": "Extrai HTML"
+    },
+    {
+      "parameters": {
+        "mode": "runOnceForAllItems",
+        "jsCode": "const menu = $('Extrai cardápio').first().json.output ?? {};\nconst template = $input.first().json.template ?? '';\n\nconst esc = (value) => String(value ?? '')\n  .replace(/&/g, '&amp;')\n  .replace(/</g, '&lt;')\n  .replace(/>/g, '&gt;')\n  .replace(/\"/g, '&quot;')\n  .replace(/'/g, '&#39;');\n\nconst categorias = Array.isArray(menu.categorias) ? menu.categorias : [];\nif (categorias.length === 0) {\n  throw new Error('Não consegui identificar itens no cardápio. Envie novamente com os pratos e preços.');\n}\n\nconst categoriasHtml = categorias\n  .filter((categoria) => Array.isArray(categoria?.itens) && categoria.itens.length > 0)\n  .map((categoria) => {\n    const itens = categoria.itens.map((item) => {\n      const descricao = item?.descricao\n        ? `<div class=\"item-desc\">${esc(item.descricao)}</div>`\n        : '';\n      return `\n        <div class=\"item\">\n          <div class=\"item-info\">\n            <div class=\"item-nome\">${esc(item?.nome)}</div>\n            ${descricao}\n          </div>\n          <div class=\"item-preco\">${esc(item?.preco || '—')}</div>\n        </div>`;\n    }).join('');\n\n    return `\n      <section class=\"categoria\">\n        <h2>${esc(categoria?.nome || 'Pratos')}</h2>\n        ${itens}\n      </section>`;\n  })\n  .join('');\n\nif (!categoriasHtml.trim()) {\n  throw new Error('Não consegui identificar itens no cardápio. Envie novamente com os pratos e preços.');\n}\n\nconst data = String(menu.data ?? '').trim()\n  ? esc(menu.data)\n  : new Date().toLocaleDateString('pt-BR', {\n      timeZone: 'America/Fortaleza',\n      day: '2-digit',\n      month: 'long',\n      year: 'numeric'\n    });\n\nconst restaurante = esc($env.RESTAURANT_NAME || menu.estabelecimento || 'Restaurante');\nconst titulo = esc(menu.titulo || 'Cardápio de Hoje');\nconst observacoes = String(menu.observacoes ?? '').trim()\n  ? `<div class=\"obs\"><strong>Observações:</strong> ${esc(menu.observacoes)}</div>`\n  : '';\n\nconst html = template\n  .replaceAll('{{TITULO}}', titulo)\n  .replaceAll('{{RESTAURANTE}}', restaurante)\n  .replaceAll('{{DATA}}', data)\n  .replaceAll('{{CATEGORIAS}}', categoriasHtml)\n  .replaceAll('{{OBSERVACOES}}', observacoes);\n\nreturn [{ json: { html } }];"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        460,
+        0
+      ],
+      "id": "56225dc3-033d-45c0-8cce-2b872df95645",
+      "name": "Monta HTML"
+    },
+    {
+      "parameters": {
+        "mode": "runOnceForAllItems",
+        "jsCode": "const html = $input.first().json.html;\nif (!html) throw new Error('HTML do cardápio não foi gerado.');\n\nreturn [{\n  json: {},\n  binary: {\n    data: {\n      data: Buffer.from(html, 'utf8').toString('base64'),\n      mimeType: 'text/html',\n      fileName: 'index.html',\n      fileExtension: 'html'\n    }\n  }\n}];"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        680,
+        0
+      ],
+      "id": "943d1bde-22c3-4d0a-9f8e-8932abc4a8b2",
+      "name": "Prepara arquivo HTML"
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "http://gotenberg:3000/forms/chromium/screenshot/html",
+        "sendBody": true,
+        "contentType": "multipart-form-data",
+        "bodyParameters": {
+          "parameters": [
+            {
+              "parameterType": "formBinaryData",
+              "name": "files",
+              "inputDataFieldName": "data"
+            },
+            {
+              "parameterType": "formData",
+              "name": "width",
+              "value": "1080"
+            },
+            {
+              "parameterType": "formData",
+              "name": "height",
+              "value": "3000"
+            },
+            {
+              "parameterType": "formData",
+              "name": "format",
+              "value": "jpeg"
+            },
+            {
+              "parameterType": "formData",
+              "name": "quality",
+              "value": "90"
+            },
+            {
+              "parameterType": "formData",
+              "name": "selector",
+              "value": "#cardapio"
+            }
+          ]
+        },
+        "options": {
+          "timeout": 60000,
+          "response": {
+            "response": {
+              "responseFormat": "file",
+              "outputPropertyName": "data"
+            }
+          }
+        }
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        900,
+        0
+      ],
+      "id": "0a65bc26-7902-4247-a662-46b23f373484",
+      "name": "Gera imagem"
+    },
+    {
+      "parameters": {
+        "mode": "runOnceForAllItems",
+        "jsCode": "const bin = $input.first().binary?.data;\nif (!bin) throw new Error('Imagem do cardápio não foi gerada.');\n\nconst buffer = await helpers.getBinaryDataBuffer(0, 'data');\nconst original = $('Filtrar mensagem').first().json;\nconst restaurante = String($env.RESTAURANT_NAME ?? '').trim();\n\nreturn [{\n  json: {\n    number: original.chatId,\n    mediatype: 'image',\n    mimetype: 'image/jpeg',\n    fileName: 'cardapio.jpg',\n    caption: `Cardápio de hoje${restaurante ? ' — ' + restaurante : ''} 🍽️`,\n    media: buffer.toString('base64')\n  }\n}];"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1120,
+        0
+      ],
+      "id": "b45169c5-1268-499b-a3c5-148b9d865fdb",
+      "name": "Prepara envio"
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "=http://api:8080/message/sendMedia/{{ $('Filtrar mensagem').first().json.instance }}",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "apikey",
+              "value": "={{ $env.AUTHENTICATION_API_KEY }}"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify($json) }}",
+        "options": {
+          "timeout": 120000
+        }
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        1340,
+        0
+      ],
+      "id": "57b92c85-990a-4559-bfe0-a3e36f19f44c",
+      "name": "Envia cardápio"
     }
   ],
   "pinData": {},
@@ -88,18 +266,111 @@
       "main": [
         [
           {
-            "node": "verifica o número da mensagem",
+            "node": "Filtrar mensagem",
             "type": "main",
             "index": 0
           }
         ]
       ]
     },
-    "verifica o número da mensagem": {
+    "Filtrar mensagem": {
       "main": [
         [
           {
-            "node": "Generate an image",
+            "node": "Avisa que está gerando",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "Extrai cardápio",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Google Gemini Chat Model": {
+      "ai_languageModel": [
+        [
+          {
+            "node": "Extrai cardápio",
+            "type": "ai_languageModel",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Extrai cardápio": {
+      "main": [
+        [
+          {
+            "node": "Lê template",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Lê template": {
+      "main": [
+        [
+          {
+            "node": "Extrai HTML",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Extrai HTML": {
+      "main": [
+        [
+          {
+            "node": "Monta HTML",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Monta HTML": {
+      "main": [
+        [
+          {
+            "node": "Prepara arquivo HTML",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Prepara arquivo HTML": {
+      "main": [
+        [
+          {
+            "node": "Gera imagem",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Gera imagem": {
+      "main": [
+        [
+          {
+            "node": "Prepara envio",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Prepara envio": {
+      "main": [
+        [
+          {
+            "node": "Envia cardápio",
             "type": "main",
             "index": 0
           }
@@ -107,18 +378,14 @@
       ]
     }
   },
-  "active": true,
+  "active": false,
   "settings": {
-    "executionOrder": "v1",
-    "binaryMode": "separate",
-    "timeSavedMode": "fixed",
-    "callerPolicy": "workflowsFromSameOwner",
-    "availableInMCP": false
+    "executionOrder": "v1"
   },
-  "versionId": "82faf6c4-c4f9-4ca3-96ac-6dda1e119b01",
+  "versionId": "508d4160-5828-4a63-acda-d03b8d4b751b",
   "meta": {
-    "instanceId": "8c39f4fce82b852e3cfd53d62622cd8ec806fb6c854ea00f925278faf9c1c62d"
+    "templateCredsSetupCompleted": false
   },
-  "id": "0HzOhrwH1dELl96u",
+  "id": "d541a581e8801055",
   "tags": []
 }
