@@ -1,0 +1,124 @@
+{
+  "name": "My workflow",
+  "nodes": [
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "cardapio-whatsapp",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2.1,
+      "position": [
+        -256,
+        -64
+      ],
+      "id": "1b4ecf5e-5f9f-4b12-bdda-862c6c3dc6aa",
+      "name": "Recebe mensagem",
+      "webhookId": "1d7494df-a3d8-48f2-9c80-6a6e48bbfa6e"
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 3
+          },
+          "conditions": [
+            {
+              "id": "4aa60c38-8818-4182-af96-39874dcb60ac",
+              "leftValue": "={{$json.body.event}}",
+              "rightValue": "messages.upsert",
+              "operator": {
+                "type": "string",
+                "operation": "equals",
+                "name": "filter.operator.equals"
+              }
+            },
+            {
+              "id": "a785b89f-bb2d-44d9-862c-97bc28945f64",
+              "leftValue": "={{ $json.body.data.key.remoteJid }}",
+              "rightValue": "5585986242299@s.whatsapp.net",
+              "operator": {
+                "type": "string",
+                "operation": "equals",
+                "name": "filter.operator.equals"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.3,
+      "position": [
+        -64,
+        -64
+      ],
+      "id": "c975800c-11a5-4b4d-8660-42c944f8940f",
+      "name": "verifica o número da mensagem"
+    },
+    {
+      "parameters": {
+        "resource": "image",
+        "modelId": {
+          "__rl": true,
+          "mode": "list",
+          "value": ""
+        },
+        "prompt": "={{ $('Recebe mensagem').item.json.body.data.message.conversation }}",
+        "options": {}
+      },
+      "type": "@n8n/n8n-nodes-langchain.googleGemini",
+      "typeVersion": 1.1,
+      "position": [
+        128,
+        -176
+      ],
+      "id": "17acad15-2510-46a4-ab19-96f1489bd110",
+      "name": "Generate an image"
+    }
+  ],
+  "pinData": {},
+  "connections": {
+    "Recebe mensagem": {
+      "main": [
+        [
+          {
+            "node": "verifica o número da mensagem",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "verifica o número da mensagem": {
+      "main": [
+        [
+          {
+            "node": "Generate an image",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "active": true,
+  "settings": {
+    "executionOrder": "v1",
+    "binaryMode": "separate",
+    "timeSavedMode": "fixed",
+    "callerPolicy": "workflowsFromSameOwner",
+    "availableInMCP": false
+  },
+  "versionId": "82faf6c4-c4f9-4ca3-96ac-6dda1e119b01",
+  "meta": {
+    "instanceId": "8c39f4fce82b852e3cfd53d62622cd8ec806fb6c854ea00f925278faf9c1c62d"
+  },
+  "id": "0HzOhrwH1dELl96u",
+  "tags": []
+}
