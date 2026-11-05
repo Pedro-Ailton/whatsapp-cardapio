@@ -4,17 +4,16 @@
     container_name: evolution_api
     restart: unless-stopped
     depends_on:
-      - redis
-      - evolution-postgres
+      redis:
+        condition: service_started
+      evolution-mysql:
+        condition: service_healthy
     ports:
       - "127.0.0.1:8080:8080"
     env_file:
       - .env
     volumes:
       - evolution_instances:/evolution/instances
-    networks:
-      - default
-      - cardapio-net
 
   redis:
     image: redis:7-alpine
@@ -24,16 +23,26 @@
     volumes:
       - evolution_redis_data:/data
 
-  evolution-postgres:
-    image: postgres:15-alpine
-    container_name: evolution_postgres
+  evolution-mysql:
+    image: mysql:8.0
+    container_name: evolution_mysql
     restart: unless-stopped
     environment:
-      POSTGRES_DB: ${POSTGRES_DATABASE}
-      POSTGRES_USER: ${POSTGRES_USERNAME}
-      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+      MYSQL_DATABASE: ${MYSQL_DATABASE}
+      MYSQL_USER: ${MYSQL_USERNAME}
+      MYSQL_PASSWORD: ${MYSQL_PASSWORD}
+      MYSQL_ROOT_PASSWORD: ${MYSQL_ROOT_PASSWORD}
+    command:
+      - --character-set-server=utf8mb4
+      - --collation-server=utf8mb4_unicode_ci
     volumes:
-      - postgres_data:/var/lib/postgresql/data
+      - mysql_data:/var/lib/mysql
+    healthcheck:
+      test: ["CMD", "mysqladmin", "ping", "-h", "localhost", "-uroot", "-p${MYSQL_ROOT_PASSWORD}"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 30s
 
   n8n:
     image: docker.n8n.io/n8nio/n8n
@@ -43,19 +52,26 @@
       - "127.0.0.1:5678:5678"
     volumes:
       - n8n_data:/home/node/.n8n
-    networks:
-      - cardapio-net
+      - ./templates:/templates:ro
     environment:
       TZ: America/Fortaleza
       GENERIC_TIMEZONE: America/Fortaleza
+      N8N_BLOCK_ENV_ACCESS_IN_NODE: "false"
+      N8N_RESTRICT_FILE_ACCESS_TO: /templates
+      EXECUTIONS_DATA_PRUNE: "true"
+      EXECUTIONS_DATA_MAX_AGE: "24"
+      OWNER_NUMBER: ${OWNER_NUMBER}
+      RESTAURANT_NAME: ${RESTAURANT_NAME}
+      AUTHENTICATION_API_KEY: ${AUTHENTICATION_API_KEY}
+
+  gotenberg:
+    image: gotenberg/gotenberg:8
+    container_name: gotenberg
+    restart: unless-stopped
 
 volumes:
   evolution_instances:
   evolution_redis_data:
-  postgres_data:
+  mysql_data:
   n8n_data:
-    external: true
-
-networks:
-  cardapio-net:
     external: true
