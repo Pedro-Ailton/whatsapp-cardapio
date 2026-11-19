@@ -1,0 +1,373 @@
+{
+  "name": "Cardápio WhatsApp",
+  "nodes": [
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "cardapio-whatsapp2",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2.1,
+      "position": [
+        688,
+        -80
+      ],
+      "id": "976e216d-a36c-457e-81ef-3d3288196338",
+      "name": "Recebe mensagem",
+      "webhookId": "27a781d4-3c8e-4a5f-81a5-a116aa4aa691"
+    },
+    {
+      "parameters": {
+        "jsCode": "const body = $input.first().json.body ?? {};\nconst data = body.data ?? {};\nconst key = data.key ?? {};\n\n// Número autorizado — configure localmente no n8n\nconst NUMERO_AUTORIZADO = 'COLOQUE_SEU_NUMERO_AQUI';\n\n// Identifica o número pela conversa, não pelo body.sender\nconst numeroRemetente = String(\n  key.remoteJidAlt ?? key.remoteJid ?? ''\n)\n  .split('@')[0]\n  .replace(/\\D/g, '');\n\nconst numeroAutorizado = NUMERO_AUTORIZADO.replace(/\\D/g, '');\n\nconst remoteJid = String(key.remoteJid ?? '');\n\n// 1. Ignora mensagens enviadas pelo próprio bot\nif (key.fromMe === true) {\n  return [];\n}\n\n// 2. Aceita somente conversas privadas\nif (!remoteJid.endsWith('@s.whatsapp.net')) {\n  return [];\n}\n\n// 3. Bloqueia se o número autorizado não estiver configurado\nif (!numeroAutorizado) {\n  return [];\n}\n\n// 4. Aceita somente o número autorizado\nif (numeroRemetente !== numeroAutorizado) {\n  return [];\n}\n\n// 5. Extrai o texto da mensagem\nconst texto =\n  data.message?.conversation ??\n  data.message?.extendedTextMessage?.text ??\n  '';\n\nconst textoLimpo = texto.trim();\n\nif (!textoLimpo) {\n  return [];\n}\n\n// 6. Normaliza para aceitar CARDÁPIO ou CARDAPIO\nconst textoNormalizado = textoLimpo\n  .normalize('NFD')\n  .replace(/\\p{Diacritic}/gu, '');\n\nif (!/^CARDAPIO\\b/i.test(textoNormalizado)) {\n  return [];\n}\n\n// 7. Remove a palavra-chave antes de enviar para a IA\nconst mensagemParaIA = textoLimpo\n  .replace(/^CARD[ÁA]PIO\\b[\\s:,-]*/i, '')\n  .trim();\n\nif (!mensagemParaIA) {\n  return [];\n}\n\n// 8. Entrega os dados aos próximos nodes\nreturn [{\n  json: {\n    instancia: body.instance ?? '',\n    texto: mensagemParaIA,\n    chatId: numeroAutorizado,\n    numeroSender: numeroRemetente,\n    fromMe: false\n  }\n}];"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        880,
+        -80
+      ],
+      "id": "fb0b5961-fdd4-4837-8414-139c05fc3039",
+      "name": "Filtrar mensagem"
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "=http://EVOLUTION_API_URL_REMOVER/message/sendText/{{ $json.instance }}",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "apikey",
+              "value": "={{ $env.AUTHENTICATION_API_KEY }}"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({ number: $json.chatId, text: 'Recebi! Estou montando o cardápio...' }) }}",
+        "options": {
+          "timeout": 15000
+        }
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        1120,
+        -256
+      ],
+      "id": "63c44bfc-33e7-4885-8f1d-92c440a88f9f",
+      "name": "Avisa que está gerando",
+      "onError": "continueRegularOutput"
+    },
+    {
+      "parameters": {
+        "text": "={{ $('Filtrar mensagem').first().json.texto }}",
+        "schemaType": "manual",
+        "inputSchema": "\n{\n  \"type\": \"object\",\n  \"properties\": {\n    \"proteinas\": {\n      \"type\": \"array\",\n      \"description\": \"Lista de proteínas informadas pelo proprietário, mantendo os nomes e a ordem original.\",\n      \"items\": {\n        \"type\": \"string\"\n      }\n    },\n    \"data\": {\n      \"type\": \"string\",\n      \"description\": \"Data do cardápio, caso seja informada. Caso contrário, deixe vazia.\"\n    },\n    \"estabelecimento\": {\n      \"type\": \"string\",\n      \"description\": \"Nome do restaurante, caso seja informado. Caso contrário, deixe vazio.\"\n    },\n    \"titulo\": {\n      \"type\": \"string\",\n      \"description\": \"Título do cardápio, caso seja informado. Caso contrário, deixe vazio.\"\n    }\n  },\n  \"required\": [\n    \"proteinas\",\n    \"data\"\n  ]\n}\n",
+        "options": {
+          "systemPromptTemplate": "\nVocê é um assistente especializado em identificar proteínas para cardápios de restaurantes.\n\nSua tarefa é extrair as opções de proteínas informadas pelo proprietário na mensagem recebida.\n\nREGRAS OBRIGATÓRIAS:\n\n1. Extraia somente os nomes das proteínas mencionadas.\n2. Mantenha a ordem em que as proteínas aparecem na mensagem.\n3. Preserve os nomes conforme foram escritos pelo proprietário.\n4. Não invente, acrescente ou modifique proteínas.\n5. Não inclua acompanhamentos como arroz, feijão, salada, maionese, farofa ou cuscuz.\n6. Não inclua preços, descrições ou categorias.\n7. Não remova proteínas repetidas.\n8. Não considere formas diferentes de preparo como proteínas iguais. Extraia exatamente o que foi informado.\n9. Se a mensagem informar uma data, extraia essa data. Caso contrário, retorne uma string vazia.\n10. Se o estabelecimento ou título não forem informados, retorne strings vazias.\n11. Se nenhuma proteína for identificada, retorne uma lista vazia.\n12. Retorne somente os dados no formato JSON definido pelo schema. Não escreva explicações.\n\nO proprietário pode escrever de maneira informal, com frases curtas ou listas. Interprete a mensagem considerando o contexto de atualização do cardápio diário.\n"
+        }
+      },
+      "type": "@n8n/n8n-nodes-langchain.informationExtractor",
+      "typeVersion": 1.2,
+      "position": [
+        1088,
+        -80
+      ],
+      "id": "f91332bc-ef82-45ee-8293-575dda7b5cc5",
+      "name": "Extrai cardápio"
+    },
+    {
+      "parameters": {
+        "modelName": "models/gemini-3.5-flash-lite",
+        "options": {
+          "temperature": 0.1
+        }
+      },
+      "type": "@n8n/n8n-nodes-langchain.lmChatGoogleGemini",
+      "typeVersion": 1.2,
+      "position": [
+        1088,
+        144
+      ],
+      "id": "e24b8a86-c9a5-4a07-8133-df6b2386cc2f",
+      "name": "Google Gemini Chat Model"
+    },
+    {
+      "parameters": {
+        "fileSelector": "/templates/cardapio.html",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.readWriteFile",
+      "typeVersion": 1.1,
+      "position": [
+        832,
+        368
+      ],
+      "id": "3152089b-3cc0-4a9a-a24b-fc60e83f6880",
+      "name": "Lê template",
+      "disabled": true
+    },
+    {
+      "parameters": {
+        "operation": "text",
+        "destinationKey": "template",
+        "options": {
+          "keepSource": "json"
+        }
+      },
+      "type": "n8n-nodes-base.extractFromFile",
+      "typeVersion": 1.2,
+      "position": [
+        1040,
+        368
+      ],
+      "id": "37474ddd-1fbe-4009-b0c4-72d59dd7bf41",
+      "name": "Extrai HTML",
+      "disabled": true
+    },
+    {
+      "parameters": {
+        "jsCode": "\nconst menu = $('Extrai cardápio').first().json.output ?? {};\n\nconst esc = (value) => String(value ?? '')\n  .replace(/&/g, '&amp;')\n  .replace(/</g, '&lt;')\n  .replace(/>/g, '&gt;')\n  .replace(/\"/g, '&quot;')\n  .replace(/'/g, '&#39;');\n\n// Recebe somente as proteínas extraídas pelo Gemini\nconst proteinas = Array.isArray(menu.proteinas)\n  ? menu.proteinas\n  : [];\n\nif (proteinas.length === 0) {\n  throw new Error(\n    'Nenhuma proteína foi identificada. Verifique a mensagem enviada e a extração do Gemini.'\n  );\n}\n\n// Monta os cartões das proteínas\nconst categoriasHtml = `\n  <div class=\"categoria\">\n    <div class=\"itens\">\n      ${proteinas.map((proteina) => `\n        <div class=\"item\">\n          <div class=\"item-nome\">${esc(proteina)}</div>\n        </div>\n      `).join('')}\n    </div>\n  </div>\n`;\n\nconst data = String(menu.data ?? '').trim()\n  ? esc(menu.data)\n  : new Date().toLocaleDateString('pt-BR', {\n      timeZone: 'America/Fortaleza',\n      day: '2-digit',\n      month: 'long',\n      year: 'numeric'\n    });\n\nconst restaurante = esc(menu.estabelecimento || 'Restaurante');\n\nconst titulo = esc(menu.titulo || 'Cardápio de Hoje');\n\n// HTML completo do cardápio\nconst template = `\n<!DOCTYPE html>\n<html lang=\"pt-BR\">\n<head>\n<meta charset=\"UTF-8\">\n<meta name=\"viewport\" content=\"width=device-width, initial-scale=1.0\">\n<title>Cardápio do Dia</title>\n<style>\n*{box-sizing:border-box}\nbody{margin:0;padding:28px;background:#fff7ed;font-family:Arial,Helvetica,sans-serif;color:#263238}\n#cardapio{width:100%;max-width:1024px;margin:auto;background:#fff;border-radius:28px;overflow:hidden;box-shadow:0 12px 35px #713f121c}\n.cabecalho{padding:48px 42px;text-align:center;color:white;background:linear-gradient(135deg,#f97316,#dc2626)}\n.selo{display:inline-block;padding:8px 18px;border-radius:30px;background:#ffffff30;font-weight:bold;letter-spacing:1px;text-transform:uppercase;font-size:14px}\nh1{font-size:54px;line-height:1.05;margin:20px 0 10px}\n.restaurante{font-size:24px;font-weight:bold}\n.data{font-size:18px;margin-top:12px}\n.conteudo{padding:34px 42px}\nh2{font-size:30px;color:#c2410c;margin:0 0 20px}\n.informacoes-fixas{background:#fff7ed;border:2px solid #fed7aa;border-radius:22px;padding:26px;margin-bottom:32px}\n.precos{display:flex;gap:18px;flex-wrap:wrap}\n.preco-card{flex:1;min-width:230px;background:white;border-radius:18px;padding:22px;border:1px solid #fdba74}\n.preco-card h3{margin:0 0 8px;font-size:23px;color:#9a3412}\n.preco{font-size:34px;font-weight:800;color:#ea580c;margin:8px 0}\n.preco-card p{margin:0;font-size:17px}\n.acompanhamentos{display:flex;flex-wrap:wrap;gap:10px;margin-top:14px}\n.acompanhamento{background:#dcfce7;color:#166534;padding:10px 16px;border-radius:30px;font-weight:bold;font-size:16px}\n.categoria{margin:26px 0}\n.categoria h3{font-size:25px;color:#166534;border-bottom:3px solid #bbf7d0;padding-bottom:10px}\n.itens{display:grid;grid-template-columns:1fr 1fr;gap:14px}\n.item{background:#fff7ed;border-radius:15px;padding:18px;border-left:6px solid #f97316}\n.item-nome{font-size:21px;font-weight:bold}\n.observacoes{margin-top:28px;padding:20px;background:#fef3c7;border-radius:16px;font-size:17px}\n.rodape{text-align:center;padding:24px;background:#14532d;color:white;font-weight:bold;font-size:18px}\n@media(max-width:650px){.cabecalho{padding:34px 20px}h1{font-size:40px}.conteudo{padding:26px 20px}.itens{grid-template-columns:1fr}.precos{display:block}.preco-card{margin-bottom:12px}}\n.acompanhamentos-destaque{margin-top:30px;padding:28px;background:#14532d;border:4px solid #86efac;border-radius:22px;box-shadow:0 8px 20px #14532d24}\n.acompanhamentos-destaque h2{color:#fff;font-size:32px;margin-bottom:8px}\n.acompanhamentos-subtitulo{color:#dcfce7;font-size:18px;font-weight:bold;margin:0 0 18px}\n.acompanhamentos-destaque .acompanhamento{background:#fff;color:#14532d;border:2px solid #bbf7d0;padding:13px 20px;font-size:19px;font-weight:800;box-shadow:0 2px 5px #00000018}\n.proteinas-dia{margin-bottom:34px}\n</style>\n</head>\n<body>\n<div id=\"cardapio\">\n<header class=\"cabecalho\">\n<div class=\"selo\">Sabor do dia</div>\n<h1>${titulo}</h1>\n<div class=\"restaurante\">${restaurante}</div>\n<div class=\"data\">${data}</div>\n</header>\n\n<main class=\"conteudo\">\n\n<section class=\"informacoes-fixas\">\n<h2>Monte sua marmita</h2>\n<div class=\"precos\">\n<div class=\"preco-card\">\n<h3>Marmita pequena</h3>\n<div class=\"preco\">R$ 13,00</div>\n<p>Escolha 1 opção de proteína</p>\n</div>\n<div class=\"preco-card\">\n<h3>Marmita grande</h3>\n<div class=\"preco\">R$ 15,00</div>\n<p>Escolha 2 opções de proteína</p>\n</div>\n</div>\n</section>\n\n<section class=\"informacoes-fixas\">\n<section class=\"proteinas-dia\">\n<h2>Escolha suas proteínas</h2>\n${categoriasHtml}\n</section>\n</section>\n\n<section class=\"acompanhamentos-destaque\">\n<h2>Escolha seus acompanhamentos</h2>\n<p class=\"acompanhamentos-subtitulo\">Você também pode escolher seus acompanhamentos favoritos:</p>\n<div class=\"acompanhamentos\">\n<span class=\"acompanhamento\">Arroz</span>\n<span class=\"acompanhamento\">Feijão</span>\n<span class=\"acompanhamento\">Salada verde</span>\n<span class=\"acompanhamento\">Salada de maionese</span>\n<span class=\"acompanhamento\">Farofa</span>\n<span class=\"acompanhamento\">Cuscuz</span>\n</div>\n</section>\n\n</main>\n<footer class=\"rodape\">Feito com carinho para você!</footer>\n</div>\n</body>\n</html>\n`;\n\nreturn [{\n  json: {\n    html: template\n  }\n}];\n"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1424,
+        -80
+      ],
+      "id": "5459b883-a367-4f76-abd7-fb57290a57da",
+      "name": "Monta HTML"
+    },
+    {
+      "parameters": {
+        "jsCode": "const html = $input.first().json.html;\nif (!html) throw new Error('HTML do cardápio não foi gerado.');\n\nreturn [{\n  json: {},\n  binary: {\n    data: {\n      data: Buffer.from(html, 'utf8').toString('base64'),\n      mimeType: 'text/html',\n      fileName: 'index.html',\n      fileExtension: 'html'\n    }\n  }\n}];"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1632,
+        -80
+      ],
+      "id": "2488f5d7-2ae5-4428-9271-61e56614a073",
+      "name": "Prepara arquivo HTML"
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "http://GOTENBERG_URL_REMOVER/forms/chromium/screenshot/html",
+        "sendBody": true,
+        "contentType": "multipart-form-data",
+        "bodyParameters": {
+          "parameters": [
+            {
+              "parameterType": "formBinaryData",
+              "name": "files",
+              "inputDataFieldName": "data"
+            },
+            {
+              "name": "width",
+              "value": "1080"
+            },
+            {
+              "name": "height",
+              "value": "3000"
+            },
+            {
+              "name": "format",
+              "value": "jpeg"
+            },
+            {
+              "name": "quality",
+              "value": "90"
+            },
+            {
+              "name": "selector",
+              "value": "#cardapio"
+            }
+          ]
+        },
+        "options": {
+          "response": {
+            "response": {
+              "responseFormat": "file"
+            }
+          },
+          "timeout": 60000
+        }
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        1856,
+        -80
+      ],
+      "id": "01e320e2-e255-4f2c-afed-2663e21beb72",
+      "name": "Gera imagem"
+    },
+    {
+      "parameters": {
+        "jsCode": "\nconst bin = $input.first().binary?.data;\n\nif (!bin) {\n  throw new Error('Imagem do cardápio não foi gerada.');\n}\n\nconst buffer = await helpers.getBinaryDataBuffer(0, 'data');\nconst original = $('Filtrar mensagem').first().json;\n\nconst restaurante = 'Restaurante';\n\nreturn [{\n  json: {\n    number: original.chatId,\n    mediatype: 'image',\n    mimetype: 'image/jpeg',\n    fileName: 'cardapio.jpg',\n    caption: `Cardápio de hoje — ${restaurante} 🍽️`,\n    media: buffer.toString('base64')\n  }\n}];"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        2080,
+        -80
+      ],
+      "id": "94fbf6a4-50ea-40c7-aa60-fb52928e94f7",
+      "name": "Prepara envio"
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "=http://EVOLUTION_API_URL_REMOVER/message/sendMedia/{{ $('Filtrar mensagem').first().json.instancia }}",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": []
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify($json) }}",
+        "options": {
+          "timeout": 120000
+        }
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        2304,
+        -80
+      ],
+      "id": "a901807d-cb0c-41e9-9454-2d4d7412d017",
+      "name": "Envia cardápio"
+    }
+  ],
+  "pinData": {},
+  "connections": {
+    "Recebe mensagem": {
+      "main": [
+        [
+          {
+            "node": "Filtrar mensagem",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Filtrar mensagem": {
+      "main": [
+        [
+          {
+            "node": "Avisa que está gerando",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "Extrai cardápio",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Google Gemini Chat Model": {
+      "ai_languageModel": [
+        [
+          {
+            "node": "Extrai cardápio",
+            "type": "ai_languageModel",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Extrai cardápio": {
+      "main": [
+        [
+          {
+            "node": "Monta HTML",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Lê template": {
+      "main": [
+        [
+          {
+            "node": "Extrai HTML",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Extrai HTML": {
+      "main": [
+        []
+      ]
+    },
+    "Monta HTML": {
+      "main": [
+        [
+          {
+            "node": "Prepara arquivo HTML",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Prepara arquivo HTML": {
+      "main": [
+        [
+          {
+            "node": "Gera imagem",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Gera imagem": {
+      "main": [
+        [
+          {
+            "node": "Prepara envio",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Prepara envio": {
+      "main": [
+        [
+          {
+            "node": "Envia cardápio",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "active": true,
+  "settings": {
+    "executionOrder": "v1",
+    "binaryMode": "separate"
+  },
+  "versionId": "08644df1-5af5-42fb-9c59-27055df2acea",
+  "meta": {
+    "templateCredsSetupCompleted": true
+  },
+  "nodeGroups": [],
+  "id": "gWMRPVrQiwxBirIS",
+  "tags": []
+}
