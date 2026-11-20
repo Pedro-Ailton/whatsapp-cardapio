@@ -111,7 +111,7 @@ O webhook global deve estar configurado no `.env`. Não é necessário cadastrar
 ## Importar o workflow no n8n
 
 1. Abra http://localhost:5678.
-2. Importe o arquivo `n8n/workflows/cardapio-whatsapp-corrigido.json` ou o arquivo corrigido disponibilizado neste projeto.
+2. Importe o arquivo `n8n/workflows/cardapio-whatsapp-final.json` ou o arquivo corrigido disponibilizado neste projeto.
 3. Abra o node `Filtrar mensagem`.
 4. Localize a linha:
 
@@ -215,14 +215,14 @@ O nome do estabelecimento, o título e a data podem ser extraídos da mensagem e
 ├── .env.example
 ├── n8n/
 │   └── workflows/
-│       └── cardapio-whatsapp-corrigido.json
+│       └── cardapio-whatsapp-final.json
 └── templates/
     └── cardapio.html
 ```
 
 - `docker-compose.yml`: configuração dos serviços Evolution API, MySQL, Redis, n8n e Gotenberg.
 - `.env.example`: exemplo das variáveis de ambiente.
-- `n8n/workflows/cardapio-whatsapp-corrigido.json`: exportação do workflow.
+- `n8n/workflows/cardapio-whatsapp-final.json`: exportação do workflow.
 - `templates/cardapio.html`: arquivo mantido no repositório, mas não utilizado pelo workflow atual. O HTML é montado diretamente no node `Monta HTML`.
 
 ## Solução de problemas
