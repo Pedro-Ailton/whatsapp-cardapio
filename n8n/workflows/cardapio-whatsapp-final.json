@@ -1,0 +1,322 @@
+{
+  "name": "Cardápio WhatsApp",
+  "nodes": [
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "cardapio-whatsapp2",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2.1,
+      "position": [
+        688,
+        -80
+      ],
+      "id": "976e216d-a36c-457e-81ef-3d3288196338",
+      "name": "Recebe mensagem",
+      "webhookId": "27a781d4-3c8e-4a5f-81a5-a116aa4aa691"
+    },
+    {
+      "parameters": {
+        "jsCode": "const body = $input.first().json.body ?? {};\nconst data = body.data ?? {};\nconst key = data.key ?? {};\n\n// Número autorizado — configure localmente no n8n\nconst NUMERO_AUTORIZADO = '';\n\n// Identifica o número pela conversa, não pelo body.sender\nconst numeroRemetente = String(\n  key.remoteJidAlt ?? key.remoteJid ?? ''\n)\n  .split('@')[0]\n  .replace(/\\D/g, '');\n\nconst numeroAutorizado = NUMERO_AUTORIZADO.replace(/\\D/g, '');\n\nconst remoteJid = String(key.remoteJid ?? '');\n\n// 1. Ignora mensagens enviadas pelo próprio bot\nif (key.fromMe === true) {\n  return [];\n}\n\n// 2. Aceita somente conversas privadas\nif (!remoteJid.endsWith('@s.whatsapp.net')) {\n  return [];\n}\n\n// 3. Bloqueia se o número autorizado não estiver configurado\nif (!numeroAutorizado) {\n  return [];\n}\n\n// 4. Aceita somente o número autorizado\nif (numeroRemetente !== numeroAutorizado) {\n  return [];\n}\n\n// 5. Extrai o texto da mensagem\nconst texto =\n  data.message?.conversation ??\n  data.message?.extendedTextMessage?.text ??\n  '';\n\nconst textoLimpo = texto.trim();\n\nif (!textoLimpo) {\n  return [];\n}\n\n// 6. Normaliza para aceitar CARDÁPIO ou CARDAPIO\nconst textoNormalizado = textoLimpo\n  .normalize('NFD')\n  .replace(/\\p{Diacritic}/gu, '');\n\nif (!/^CARDAPIO\\b/i.test(textoNormalizado)) {\n  return [];\n}\n\n// 7. Remove a palavra-chave antes de enviar para a IA\nconst mensagemParaIA = textoLimpo\n  .replace(/^CARD[ÁA]PIO\\b[\\s:,-]*/i, '')\n  .trim();\n\nif (!mensagemParaIA) {\n  return [];\n}\n\n// 8. Entrega os dados aos próximos nodes\nreturn [{\n  json: {\n    instancia: body.instance ?? '',\n    texto: mensagemParaIA,\n    chatId: numeroAutorizado,\n    numeroSender: numeroRemetente,\n    fromMe: false\n  }\n}];"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        880,
+        -80
+      ],
+      "id": "fb0b5961-fdd4-4837-8414-139c05fc3039",
+      "name": "Filtrar mensagem"
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "=http://api:8080/message/sendText/{{ $json.instancia }}",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": []
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({ number: $json.chatId, text: 'Recebi! Estou montando o cardápio...' }) }}",
+        "options": {
+          "timeout": 15000
+        }
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        1120,
+        -256
+      ],
+      "id": "63c44bfc-33e7-4885-8f1d-92c440a88f9f",
+      "name": "Avisa que está gerando",
+      "onError": "continueRegularOutput"
+    },
+    {
+      "parameters": {
+        "text": "={{ $('Filtrar mensagem').first().json.texto }}",
+        "schemaType": "manual",
+        "inputSchema": "{\n  \"type\": \"object\",\n  \"properties\": {\n    \"proteinas\": {\n      \"type\": \"array\",\n      \"description\": \"Lista única de opções do prato principal. Extraia todos os itens informados pelo usuário, estejam eles identificados como Proteínas, Misturas ou outro nome equivalente. Trate esses nomes como a mesma categoria. Preserve os nomes e a ordem original, sem inventar ou omitir itens.\",\n      \"items\": {\n        \"type\": \"string\"\n      }\n    },\n    \"acompanhamentos\": {\n      \"type\": \"array\",\n      \"description\": \"Lista de acompanhamentos informados pelo usuário. Preserve os nomes e a ordem original. Não invente nem omita itens.\",\n      \"items\": {\n        \"type\": \"string\"\n      }\n    },\n    \"data\": {\n      \"type\": \"string\",\n      \"description\": \"Data do cardápio, caso informada. Caso contrário, deixe vazia.\"\n    },\n    \"estabelecimento\": {\n      \"type\": \"string\",\n      \"description\": \"Nome do estabelecimento, caso informado. Caso contrário, deixe vazio.\"\n    },\n    \"titulo\": {\n      \"type\": \"string\",\n      \"description\": \"Título do cardápio, caso informado. Caso contrário, deixe vazio.\"\n    }\n  },\n  \"required\": [\n    \"proteinas\",\n    \"acompanhamentos\",\n    \"data\"\n  ]\n}",
+        "options": {
+          "systemPromptTemplate": "Você é um extrator de dados de cardápios para restaurantes.\n\nSua tarefa é interpretar a mensagem recebida e extrair fielmente as informações do cardápio.\n\nREGRAS:\n\n1. PROTEÍNAS E MISTURAS:\n- \"Proteínas\" e \"Misturas\" são nomes diferentes para a mesma categoria.\n- Extraia todos os itens de ambas para o campo \"proteinas\".\n- Nunca crie campos separados para proteínas e misturas.\n- A pessoa pode usar qualquer um desses nomes para identificar os pratos principais.\n- Preserve os nomes dos itens e a ordem em que foram informados.\n- Não omita nenhum item.\n\n2. ACOMPANHAMENTOS:\n- Extraia todos os acompanhamentos para o campo \"acompanhamentos\".\n- Preserve os nomes e a ordem original.\n- Não confunda acompanhamentos com pratos principais.\n- Não omita nenhum item.\n\n3. DATA:\n- Extraia a data se estiver presente.\n- Se não houver data, deixe o campo vazio.\n\n4. ESTABELECIMENTO:\n- Extraia o nome do restaurante ou estabelecimento se informado.\n- Caso não seja informado, deixe vazio.\n\n5. TÍTULO:\n- Extraia o título do cardápio, caso informado.\n- Caso não seja informado, deixe vazio.\n\n6. FIDELIDADE:\n- Não invente alimentos.\n- Não resuma listas.\n- Não elimine itens repetidos.\n- Não altere os nomes dos pratos.\n- Aceite letras maiúsculas, minúsculas ou misturadas.\n- Retorne todos os itens enviados pelo usuário.\n\n7. PADRONIZAÇÃO DOS NOMES DOS ALIMENTOS:\n- Padronize a escrita de todos os pratos principais e acompanhamentos.\n- Escreva a primeira letra de cada item em maiúscula e o restante em minúsculas, respeitando os acentos da língua portuguesa.\n- Nas palavras seguintes, use letras minúsculas, exceto quando houver nome próprio ou sigla.\n- Exemplos:\n  \"FEIJÃO carioca\" → \"Feijão carioca\"\n  \"ARROZ BRANCO\" → \"Arroz branco\"\n  \"frango GRELHADO\" → \"Frango grelhado\"\n  \"CARNE MOÍDA COM LEGUMES\" → \"Carne moída com legumes\"\n- Essa padronização deve ser aplicada tanto em proteínas quanto em acompanhamentos.\n- Não altere o conteúdo, os ingredientes ou o significado dos pratos.\n- Não invente, remova ou resuma itens. Apenas normalize a escrita.\n\nRetorne os dados estruturados conforme o Schema configurado, sem texto adicional."
+        }
+      },
+      "type": "@n8n/n8n-nodes-langchain.informationExtractor",
+      "typeVersion": 1.2,
+      "position": [
+        1088,
+        -80
+      ],
+      "id": "f91332bc-ef82-45ee-8293-575dda7b5cc5",
+      "name": "Extrai cardápio"
+    },
+    {
+      "parameters": {
+        "modelName": "models/gemini-3.5-flash-lite",
+        "options": {
+          "temperature": 0.1
+        }
+      },
+      "type": "@n8n/n8n-nodes-langchain.lmChatGoogleGemini",
+      "typeVersion": 1.2,
+      "position": [
+        1088,
+        144
+      ],
+      "id": "e24b8a86-c9a5-4a07-8133-df6b2386cc2f",
+      "name": "Google Gemini Chat Model"
+    },
+    {
+      "parameters": {
+        "jsCode": "const bruto = $('Extrai cardápio').first().json ?? {};\nlet menu = bruto.output ?? bruto;\nif (Array.isArray(menu)) menu = menu[0]?.output ?? menu[0] ?? {};\nif (menu?.output) menu = menu.output;\nmenu = menu ?? {};\n\nconst esc = (value) => String(value ?? '')\n  .replace(/&/g, '&amp;')\n  .replace(/</g, '&lt;')\n  .replace(/>/g, '&gt;')\n  .replace(/\"/g, '&quot;')\n  .replace(/'/g, '&#39;');\n\n// Unifica Proteínas e Misturas: são nomes alternativos da mesma categoria.\nconst proteinas = [\n  ...(Array.isArray(menu.proteinas) ? menu.proteinas : []),\n  ...(Array.isArray(menu.misturas) ? menu.misturas : []),\n].map((item) => String(item ?? '').trim()).filter(Boolean);\n\nif (proteinas.length === 0) {\n  throw new Error(\n    'Nenhuma opção principal foi identificada. Verifique a mensagem enviada e a extração do Gemini.'\n  );\n}\n\n// Embute os dados extraídos no HTML real (escapa < para evitar fechamento do script).\nconst dadosParaHtml = JSON.stringify({\n  proteinas,\n  acompanhamentos: Array.isArray(menu.acompanhamentos) ? menu.acompanhamentos : [],\n  data: menu.data ?? '',\n  estabelecimento: menu.estabelecimento ?? '',\n  titulo: menu.titulo ?? '',\n}).replace(/</g, '\\\\u003c');\n\n// Monta os cartões das proteínas\nconst categoriasHtml = `\n  <div class=\"categoria\">\n    <div class=\"itens\">\n      ${proteinas.map((proteina) => `\n        <div class=\"item\">\n          <div class=\"item-nome\">${esc(proteina)}</div>\n        </div>\n      `).join('')}\n    </div>\n  </div>\n`;\n\nconst data = String(menu.data ?? '').trim()\n  ? esc(menu.data)\n  : new Date().toLocaleDateString('pt-BR', {\n      timeZone: 'America/Fortaleza',\n      day: '2-digit',\n      month: 'long',\n      year: 'numeric'\n    });\n\nconst restaurante = esc(menu.estabelecimento || 'Restaurante');\n\nconst titulo = esc(menu.titulo || 'Cardápio de Hoje');\n\n// HTML completo do cardápio\nconst template = `\n<!DOCTYPE html>\n<html lang=\"pt-BR\">\n<head>\n<meta charset=\"UTF-8\">\n<meta name=\"viewport\" content=\"width=1080\">\n<title>Cardápio - Marmitaria da Tia Cláudia</title>\n<style>\n:root{--preto:#0c0a10;--roxo:#7b2fe0;--roxo-claro:#a566ff;--roxo-escuro:#4b1796;--branco:#fff;--creme:#f6f1ff;--fit:1;--compact:1}\n*{box-sizing:border-box;margin:0;padding:0}\nhtml,body{width:1080px;height:1920px;background:var(--preto);overflow:hidden}\nbody{font-family:Georgia,'DejaVu Serif','Liberation Serif',serif;color:var(--branco);-webkit-font-smoothing:antialiased}\n.pagina{position:relative;width:1080px;height:1920px;overflow:hidden;display:flex;flex-direction:column;background:radial-gradient(circle at 50% 0%,rgba(123,47,224,.32) 0%,transparent 48%),radial-gradient(circle at 50% 100%,rgba(123,47,224,.2) 0%,transparent 45%),var(--preto)}\n.xadrez{flex-shrink:0;height:52px;background-color:#fff;background-image:linear-gradient(90deg,rgba(123,47,224,.55) 50%,transparent 50%),linear-gradient(rgba(123,47,224,.55) 50%,transparent 50%);background-size:30px 30px}\n.xadrez.topo{border-bottom:5px solid var(--roxo)}.xadrez.base{border-top:5px solid var(--roxo)}\n.conteudo{flex:1;min-height:0;display:flex;flex-direction:column;justify-content:space-evenly;gap:calc(18px * var(--fit));padding:calc(22px * var(--fit)) calc(62px * var(--fit));overflow:hidden}\nheader{text-align:center;flex-shrink:0}\n.panela{width:calc(112px * var(--fit));height:auto;display:block;margin:0 auto 4px}\n.estabelecimento{font-size:calc(72px * var(--fit));line-height:1.02;font-weight:700;font-style:italic;letter-spacing:1px;color:#fff;text-shadow:0 3px 0 var(--roxo-escuro);overflow-wrap:anywhere}\n.titulo{display:inline-block;margin-top:calc(14px * var(--fit));padding:calc(8px * var(--fit)) calc(32px * var(--fit));background:var(--roxo);border:3px dashed #fff;border-radius:60px;font-size:calc(32px * var(--fit));font-weight:700;letter-spacing:3px;text-transform:uppercase;max-width:100%;overflow-wrap:anywhere}\n.data{margin-top:calc(10px * var(--fit));font-size:calc(28px * var(--fit));font-style:italic;color:var(--roxo-claro);text-transform:capitalize}\nsection{flex-shrink:0}\n.secao-titulo{display:flex;align-items:center;gap:18px;margin-bottom:calc(16px * var(--fit))}\n.secao-titulo::before,.secao-titulo::after{content:\"\";flex:1;border-top:3px dotted var(--roxo)}\n.secao-titulo h2{font-size:calc(38px * var(--fit));font-style:italic;font-weight:700;text-align:center;line-height:1.08}\n.tamanhos{display:flex;gap:20px}\n.tamanho{flex:1;border-radius:28px;padding:calc(20px * var(--fit)) 18px calc(22px * var(--fit));text-align:center;border:3px solid var(--roxo)}\n.tamanho.grande{background:linear-gradient(160deg,var(--roxo) 0%,var(--roxo-escuro) 100%);border-color:#fff}\n.tamanho.pequena{background:var(--creme);color:var(--preto)}\n.tamanho .nome{font-size:calc(32px * var(--fit));font-weight:700;text-transform:uppercase;letter-spacing:3px}\n.tamanho .preco{margin:8px 0 6px;font-size:calc(78px * var(--fit));font-weight:700;line-height:1}\n.tamanho .preco small{font-size:calc(32px * var(--fit));margin-right:5px;vertical-align:top;position:relative;top:6px}\n.tamanho.pequena .preco{color:var(--roxo)}\n.tamanho .proteinas-qtd{display:inline-block;margin-top:8px;padding:6px 18px;border-radius:40px;font-size:calc(24px * var(--fit));font-style:italic}\n.tamanho.grande .proteinas-qtd{background:#fff;color:var(--roxo-escuro)}.tamanho.pequena .proteinas-qtd{background:var(--roxo);color:#fff}\n.lista-proteinas{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:calc(12px * var(--fit));justify-content:center}\n.proteina{min-width:0;display:flex;align-items:center;justify-content:center;gap:calc(12px * var(--fit));padding:calc(16px * var(--fit)) calc(14px * var(--fit));background:rgba(123,47,224,.18);border:2px dashed var(--roxo-claro);border-radius:20px;font-size:calc(38px * var(--fit));font-weight:700;text-align:center;line-height:1.12;overflow-wrap:anywhere}\n.proteina:only-child{grid-column:1/-1;width:75%;justify-self:center}\n.proteina .ponto{flex-shrink:0;width:calc(14px * var(--fit));height:calc(14px * var(--fit));border-radius:50%;background:var(--roxo-claro)}\n.nota{text-align:center;margin-top:-4px;margin-bottom:calc(14px * var(--fit));font-size:calc(24px * var(--fit));font-style:italic;color:rgba(255,255,255,.72)}\n.lista-acomp{display:flex;flex-wrap:wrap;justify-content:center;gap:calc(10px * var(--fit))}\n.acomp{padding:calc(10px * var(--fit)) calc(24px * var(--fit));background:#fff;color:var(--roxo-escuro);border-radius:50px;font-size:calc(30px * var(--fit));font-weight:700;border:3px solid var(--roxo);overflow-wrap:anywhere}\n.rodape{flex-shrink:0;text-align:center;padding:14px 0 16px;font-size:calc(26px * var(--fit));font-style:italic;background:var(--preto)}\n.rodape svg{width:30px;height:30px;vertical-align:-5px;margin-left:7px}\n</style>\n</head>\n<body>\n\n<!--\n  COMO O n8n USA ESTE ARQUIVO\n  Substitua APENAS o conteúdo da tag <script id=\"dados\" ...> abaixo\n  pelo JSON gerado pela IA. Aceita os dois formatos:\n    1) [ { \"output\": { ... } } ]   (formato da IA)\n    2) { \"proteinas\": [...], ... } (objeto direto)\n  Campos vazios usam valores padrão para data, estabelecimento e título. Proteínas, misturas e acompanhamentos são extraídos dinamicamente.\n-->\n<script id=\"dados\" type=\"application/json\">\n${dadosParaHtml}\n</script>\n\n<div class=\"pagina\" id=\"pagina\">\n  <div class=\"xadrez topo\"></div>\n\n  <div class=\"conteudo\" id=\"conteudo\">\n\n    <header>\n      <svg class=\"panela\" viewBox=\"0 0 160 130\" xmlns=\"http://www.w3.org/2000/svg\" aria-hidden=\"true\">\n        <g fill=\"none\" stroke=\"#ffffff\" stroke-width=\"6\" stroke-linecap=\"round\" opacity=\"0.9\">\n          <path d=\"M56 52 C46 42 66 36 56 22\"/>\n          <path d=\"M80 52 C70 42 90 36 80 22\"/>\n          <path d=\"M104 52 C94 42 114 36 104 22\"/>\n        </g>\n        <rect x=\"12\" y=\"62\" width=\"136\" height=\"14\" rx=\"7\" fill=\"#ffffff\"/>\n        <path d=\"M24 76 H136 C136 108 112 124 80 124 C48 124 24 108 24 76 Z\" fill=\"#a566ff\"/>\n        <path d=\"M34 84 C40 104 56 112 72 114\" fill=\"none\" stroke=\"#ffffff\" stroke-width=\"5\" stroke-linecap=\"round\" opacity=\"0.45\"/>\n      </svg>\n      <div class=\"estabelecimento\" id=\"estabelecimento\"></div>\n      <div class=\"titulo\" id=\"titulo\"></div>\n      <div class=\"data\" id=\"data\"></div>\n    </header>\n\n    <section>\n      <div class=\"secao-titulo\"><h2>Escolha o tamanho da sua marmita</h2></div>\n      <div class=\"tamanhos\">\n        <div class=\"tamanho grande\">\n          <div class=\"nome\">Grande</div>\n          <div class=\"preco\"><small>R$</small>15,00</div>\n          <div class=\"proteinas-qtd\">2 opções de proteína</div>\n        </div>\n        <div class=\"tamanho pequena\">\n          <div class=\"nome\">Pequena</div>\n          <div class=\"preco\"><small>R$</small>13,00</div>\n          <div class=\"proteinas-qtd\">1 opção de proteína</div>\n        </div>\n      </div>\n    </section>\n\n    <section>\n      <div class=\"secao-titulo\"><h2>Proteínas do dia</h2></div>\n      <div class=\"lista-proteinas\" id=\"proteinas\"></div>\n    </section>\n<section id=\"secao-acompanhamentos\">\n      <div class=\"secao-titulo\"><h2>Acompanhamentos</h2></div>\n      <p class=\"nota\">Acompanham a sua marmita</p>\n      <div class=\"lista-acomp\" id=\"acompanhamentos\"></div>\n    </section>\n\n  </div>\n\n  <div class=\"rodape\">\n    Feito com carinho\n    <svg viewBox=\"0 0 24 24\" xmlns=\"http://www.w3.org/2000/svg\" aria-hidden=\"true\">\n      <path fill=\"#a566ff\" d=\"M12 21s-7.5-4.6-9.6-9.3C.9 8.2 2.8 4.5 6.4 4.5c2.1 0 3.7 1.1 5.6 3.2 1.9-2.1 3.5-3.2 5.6-3.2 3.6 0 5.5 3.7 4 7.2C19.5 16.4 12 21 12 21z\"/>\n    </svg>\n  </div>\n\n  <div class=\"xadrez base\"></div>\n</div>\n\n<script>\n(function(){\n  var DEFAULTS={estabelecimento:'Marmitaria da Tia Cláudia',titulo:'Cardápio do Dia'};\n  var raw; try{raw=JSON.parse(document.getElementById('dados').textContent)}catch(e){raw=null}\n  var d=raw; if(Array.isArray(d))d=d[0]; if(d&&d.output)d=d.output; d=d||{};\n  function list(v){return Array.isArray(v)?v.map(function(x){return String(x==null?'':x).trim()}).filter(Boolean):[]}\n  function cap(v){return v.charAt(0).toUpperCase()+v.slice(1)}\n  // Backward compatibility: old workflow may still send both fields; combine into one list.\n  var main=list(d.proteinas).concat(list(d.misturas));\n  var sides=list(d.acompanhamentos);\n  document.getElementById('estabelecimento').textContent=(d.estabelecimento||'').trim()||DEFAULTS.estabelecimento;\n  document.getElementById('titulo').textContent=(d.titulo||'').trim()||DEFAULTS.titulo;\n  var date=(d.data||'').trim(); if(!date){try{date=new Date().toLocaleDateString('pt-BR',{weekday:'long',day:'numeric',month:'long',timeZone:'America/Sao_Paulo'})}catch(e){date=new Date().toLocaleDateString('pt-BR')}}\n  document.getElementById('data').textContent=date;\n  var mainBox=document.getElementById('proteinas');\n  if(!main.length){var empty=document.createElement('div');empty.className='proteina';empty.textContent='Cardápio em breve';mainBox.appendChild(empty)}\n  main.forEach(function(n){var card=document.createElement('div');card.className='proteina';var dot=document.createElement('span');dot.className='ponto';var label=document.createElement('span');label.textContent=cap(n);card.appendChild(dot);card.appendChild(label);mainBox.appendChild(card)});\n  var sideBox=document.getElementById('acompanhamentos');\n  if(!sides.length){document.getElementById('secao-acompanhamentos').style.display='none'}else{sides.forEach(function(n){var chip=document.createElement('div');chip.className='acomp';chip.textContent=cap(n);sideBox.appendChild(chip)})}\n  // Fit content without clipping: progressively tighten all scaled typography and spacing.\n  var content=document.getElementById('conteudo'); var scale=1;\n  while(content.scrollHeight>content.clientHeight+2&&scale>0.48){scale=Math.round((scale-0.04)*100)/100;document.documentElement.style.setProperty('--fit',scale)}\n})();\n</script>\n\n</body>\n</html>\n`;\n\nreturn [{\n  json: {\n    html: template\n  }\n}];"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1424,
+        -80
+      ],
+      "id": "5459b883-a367-4f76-abd7-fb57290a57da",
+      "name": "Monta HTML"
+    },
+    {
+      "parameters": {
+        "jsCode": "const html = $input.first().json.html;\nif (!html) throw new Error('HTML do cardápio não foi gerado.');\n\nreturn [{\n  json: {},\n  binary: {\n    data: {\n      data: Buffer.from(html, 'utf8').toString('base64'),\n      mimeType: 'text/html',\n      fileName: 'index.html',\n      fileExtension: 'html'\n    }\n  }\n}];"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1632,
+        -80
+      ],
+      "id": "2488f5d7-2ae5-4428-9271-61e56614a073",
+      "name": "Prepara arquivo HTML"
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "http://gotenberg:3000/forms/chromium/screenshot/html",
+        "sendBody": true,
+        "contentType": "multipart-form-data",
+        "bodyParameters": {
+          "parameters": [
+            {
+              "parameterType": "formBinaryData",
+              "name": "files",
+              "inputDataFieldName": "data"
+            },
+            {
+              "name": "width",
+              "value": "1080"
+            },
+            {
+              "name": "height",
+              "value": "3000"
+            },
+            {
+              "name": "format",
+              "value": "jpeg"
+            },
+            {
+              "name": "quality",
+              "value": "90"
+            },
+            {
+              "name": "selector",
+              "value": "#pagina"
+            }
+          ]
+        },
+        "options": {
+          "response": {
+            "response": {
+              "responseFormat": "file"
+            }
+          },
+          "timeout": 60000
+        }
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        1856,
+        -80
+      ],
+      "id": "01e320e2-e255-4f2c-afed-2663e21beb72",
+      "name": "Gera imagem"
+    },
+    {
+      "parameters": {
+        "jsCode": "\nconst bin = $input.first().binary?.data;\n\nif (!bin) {\n  throw new Error('Imagem do cardápio não foi gerada.');\n}\n\nconst buffer = await helpers.getBinaryDataBuffer(0, 'data');\nconst original = $('Filtrar mensagem').first().json;\n\nconst restaurante = 'Restaurante';\n\nreturn [{\n  json: {\n    number: original.chatId,\n    mediatype: 'image',\n    mimetype: 'image/jpeg',\n    fileName: 'cardapio.jpg',\n    caption: `Cardápio de hoje 🍽️`,\n    media: buffer.toString('base64')\n  }\n}];"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        2080,
+        -80
+      ],
+      "id": "94fbf6a4-50ea-40c7-aa60-fb52928e94f7",
+      "name": "Prepara envio"
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "=http://api:8080/message/sendMedia/{{ $('Filtrar mensagem').first().json.instancia }}",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": []
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify($json) }}",
+        "options": {
+          "timeout": 120000
+        }
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        2304,
+        -80
+      ],
+      "id": "a901807d-cb0c-41e9-9454-2d4d7412d017",
+      "name": "Envia cardápio"
+    }
+  ],
+  "pinData": {},
+  "connections": {
+    "Recebe mensagem": {
+      "main": [
+        [
+          {
+            "node": "Filtrar mensagem",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Filtrar mensagem": {
+      "main": [
+        [
+          {
+            "node": "Avisa que está gerando",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "Extrai cardápio",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Google Gemini Chat Model": {
+      "ai_languageModel": [
+        [
+          {
+            "node": "Extrai cardápio",
+            "type": "ai_languageModel",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Extrai cardápio": {
+      "main": [
+        [
+          {
+            "node": "Monta HTML",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Monta HTML": {
+      "main": [
+        [
+          {
+            "node": "Prepara arquivo HTML",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Prepara arquivo HTML": {
+      "main": [
+        [
+          {
+            "node": "Gera imagem",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Gera imagem": {
+      "main": [
+        [
+          {
+            "node": "Prepara envio",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Prepara envio": {
+      "main": [
+        [
+          {
+            "node": "Envia cardápio",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "active": false,
+  "settings": {
+    "executionOrder": "v1",
+    "binaryMode": "separate"
+  },
+  "versionId": "4a7aef9f-e30a-4387-90d1-22a162021b39",
+  "meta": {
+    "templateCredsSetupCompleted": true,
+    "instanceId": "8c39f4fce82b852e3cfd53d62622cd8ec806fb6c854ea00f925278faf9c1c62d"
+  },
+  "nodeGroups": [],
+  "id": "gWMRPVrQiwxBirIS",
+  "tags": []
+}
